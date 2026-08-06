@@ -14,6 +14,7 @@
     "start": "npm run build && electron .",
     "app": "electron .",
     "serve": "npm run build && ELECTRON_RUN_AS_NODE=1 electron server/standalone.js",
+    "serve:her": "BLOOM_DATA_DIR=\"${BLOOM_HER_DIR:-$HOME/Bloom Data - Her}\" PORT=\"${PORT:-4318}\" ELECTRON_RUN_AS_NODE=1 electron server/standalone.js",
     "dist": "npm run build && node electron/bake-data-dir.js && electron-builder --mac --dir",
     "dist:dmg": "npm run build && node electron/bake-data-dir.js && electron-builder --mac"
   },

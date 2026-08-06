@@ -54,7 +54,13 @@ body {
 }
 
 button, input, textarea, select { font: inherit; color: inherit; }
-button { cursor: pointer; border: none; background: none; }
+button {
+  cursor: pointer; border: none; background: none;
+  /* Kills the 300ms double-tap-zoom delay and the grey tap flash on iOS. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
 a { color: inherit; text-decoration: none; }
 
 ::selection { background: var(--amber); color: var(--ink); }
@@ -70,11 +76,12 @@ a { color: inherit; text-decoration: none; }
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  padding: 0 12px 16px;
-  /* Clears the macOS traffic lights in the frameless Electron window. */
-  padding-top: 52px;
+  padding: 16px 12px 16px;
   -webkit-app-region: drag;
 }
+/* Clears the macOS traffic lights — frameless Electron window only. In a
+   browser (the iPad) that strip is just wasted screen. */
+.is-electron .rail { padding-top: 52px; }
 .rail > * { -webkit-app-region: no-drag; }
 
 .rail-brand {
@@ -129,7 +136,9 @@ a { color: inherit; text-decoration: none; }
 .rail-foot { font-size: 11.5px; color: var(--faint); padding: 10px; line-height: 1.45; }
 
 .main { flex: 1; overflow-y: auto; position: relative; }
-.main-drag {
+.main-drag { display: none; }
+.is-electron .main-drag {
+  display: block;
   position: sticky; top: 0; height: 30px; z-index: 5;
   -webkit-app-region: drag;
   background: linear-gradient(var(--paper), rgba(247, 245, 240, 0));
@@ -464,6 +473,8 @@ mark.bloom-hl:hover { background: rgba(242, 212, 146, 0.85); }
   border-bottom: 1px solid var(--line-soft);
   cursor: grab;
   background: var(--paper-deep);
+  /* Claim the gesture, or the browser scrolls instead of dragging. */
+  touch-action: none;
 }
 .ask-head:active { cursor: grabbing; }
 .ask-quote {
@@ -608,10 +619,67 @@ mark.bloom-hl:hover { background: rgba(242, 212, 146, 0.85); }
 ::-webkit-scrollbar-thumb { background: rgba(27, 24, 21, 0.13); border-radius: 6px; border: 3px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(27, 24, 21, 0.24); background-clip: content-box; }
 
+/* Tablet. iPad Air portrait is 820pt wide, so it lands here — the rail has to
+   survive, because nothing else in the app navigates. A narrower rail buys
+   back reading width. */
 @media (max-width: 900px) {
-  .rail { display: none; }
-  .reader-side { display: none; }
+  .rail { width: 180px; padding-left: 8px; padding-right: 8px; }
   .page { padding: 20px 22px 80px; }
   .article { padding: 28px 24px 120px; }
   .display-xl { font-size: 38px; }
+
+  /* A floating, draggable panel is the wrong shape for touch — dock it to the
+     bottom. `!important` beats the inline left/top that carry the drag state. */
+  .ask-panel {
+    left: 0 !important;
+    top: auto !important;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 60vh;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    border-bottom: none;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .ask-head { cursor: default; touch-action: auto; }
+
+  /* The lesson list is the only way to move between lessons, so it can't just
+     be hidden here. Float it over the text instead of stealing 268px of an
+     820pt screen — the existing toggle chip still drives it. */
+  .reader-side {
+    position: fixed;
+    top: 0; right: 0; bottom: 0;
+    z-index: 80;
+    width: min(300px, 80vw);
+    background: var(--card);
+    box-shadow: var(--shadow-lg);
+    padding-top: max(18px, env(safe-area-inset-top));
+    padding-bottom: max(60px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Phone. Below this there is genuinely no room for the rail. */
+@media (max-width: 768px) {
+  .rail { display: none; }
+}
+
+/* Touch: Apple's 44pt minimum tap target. Keyed on pointer type rather than
+   width so a Mac window narrowed to 800px keeps its tighter proportions. */
+@media (pointer: coarse) {
+  .chip,
+  .seg button,
+  .btn,
+  .ask-trigger,
+  .rail-link,
+  .rail-course,
+  .side-lesson {
+    min-height: 44px;
+  }
+  .chip,
+  .seg button,
+  .ask-trigger { padding-top: 10px; padding-bottom: 10px; }
+  .btn,
+  .rail-link,
+  .rail-course,
+  .side-lesson { padding-top: 12px; padding-bottom: 12px; }
 }

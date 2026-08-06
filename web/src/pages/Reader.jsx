@@ -68,7 +68,11 @@ export default function Reader({ models, model: globalModel, reloadCourses }) {
 
   const [trigger, setTrigger] = useState(null); // {x, y, quote, anchorTop}
   const [panel, setPanel] = useState(null); // active thread
-  const [sideOpen, setSideOpen] = useState(true);
+  // Open by default on a desktop-width window; closed on tablet, where it
+  // floats over the text rather than sitting beside it.
+  const [sideOpen, setSideOpen] = useState(
+    () => !(window.matchMedia?.('(max-width: 900px)').matches ?? false),
+  );
   // Collapsed by default so the dock doesn't cover the lesson while reading.
   const [dockOpen, setDockOpen] = useState(false);
 
@@ -108,22 +112,16 @@ export default function Reader({ models, model: globalModel, reloadCourses }) {
   }, [lesson]);
 
   // --- Text selection → floating Ask button ------------------------------
+  //
+  // `selectionchange` rather than `mouseup`: iOS Safari fires no mouse events
+  // for a long-press selection or a handle drag, so mouseup would never see a
+  // touch selection at all. It does fire continuously mid-drag, hence the
+  // debounce — the button should appear once the selection settles, not while
+  // it is still being dragged.
   useEffect(() => {
-    function onMouseUp(e) {
-      if (e.target.closest?.('.ask-panel, .ask-trigger')) return;
+    let timer;
 
-      const existing = e.target.closest?.('mark.bloom-hl');
-      if (existing) {
-        const found = lesson?.annotations.find(
-          (a) => String(a.id) === existing.dataset.aid,
-        );
-        if (found) {
-          setPanel({ ...found, streaming: false });
-          setTrigger(null);
-          return;
-        }
-      }
-
+    function readSelection() {
       const sel = window.getSelection();
       const text = sel?.toString().trim() ?? '';
       if (!text || text.length < 4 || !articleRef.current) {
@@ -137,16 +135,52 @@ export default function Reader({ models, model: globalModel, reloadCourses }) {
 
       const rect = sel.getRangeAt(0).getBoundingClientRect();
       const articleRect = articleRef.current.getBoundingClientRect();
+      const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
       setTrigger({
-        x: Math.min(rect.left + rect.width / 2, window.innerWidth - 90),
-        y: Math.max(rect.top - 44, 60),
+        x: Math.min(
+          Math.max(rect.left + rect.width / 2, 90),
+          window.innerWidth - 90,
+        ),
+        // Touch sits below the selection: iOS puts its own Copy / Look Up
+        // callout directly above it, which would cover the button.
+        y: coarse
+          ? Math.min(rect.bottom + 12, window.innerHeight - 72)
+          : Math.max(rect.top - 44, 60),
         quote: text.slice(0, 600),
         anchorTop: Math.round(rect.top - articleRect.top),
       });
     }
 
-    document.addEventListener('mouseup', onMouseUp);
-    return () => document.removeEventListener('mouseup', onMouseUp);
+    function onSelectionChange() {
+      clearTimeout(timer);
+      timer = setTimeout(readSelection, 400);
+    }
+
+    // Reopening an existing highlight needs the event target, which
+    // `selectionchange` doesn't carry — so that stays a pointer handler.
+    function onPointerUp(e) {
+      if (e.target.closest?.('.ask-panel, .ask-trigger')) return;
+
+      const existing = e.target.closest?.('mark.bloom-hl');
+      if (!existing) return;
+
+      const found = lesson?.annotations.find(
+        (a) => String(a.id) === existing.dataset.aid,
+      );
+      if (found) {
+        clearTimeout(timer);
+        setPanel({ ...found, streaming: false });
+        setTrigger(null);
+      }
+    }
+
+    document.addEventListener('selectionchange', onSelectionChange);
+    document.addEventListener('pointerup', onPointerUp);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('selectionchange', onSelectionChange);
+      document.removeEventListener('pointerup', onPointerUp);
+    };
   }, [lesson]);
 
   async function saveFeedback() {
@@ -490,11 +524,14 @@ function AskPanel({ courseId, lessonNumber, model, initial, onClose, onSaved }) 
     function up() {
       drag.current = null;
     }
-    document.addEventListener('mousemove', move);
-    document.addEventListener('mouseup', up);
+    // Pointer rather than mouse events so a stylus or trackpad on the iPad
+    // drags too. Below the tablet breakpoint the panel is a fixed bottom
+    // sheet, so `pos` is unused there and nothing can start a drag.
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
     return () => {
-      document.removeEventListener('mousemove', move);
-      document.removeEventListener('mouseup', up);
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
     };
   }, []);
 
@@ -541,7 +578,8 @@ function AskPanel({ courseId, lessonNumber, model, initial, onClose, onSaved }) 
     <div className="ask-panel" style={{ left: pos.x, top: pos.y }}>
       <div
         className="ask-head"
-        onMouseDown={(e) => {
+        onPointerDown={(e) => {
+          if (e.target.closest('button')) return;
           drag.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
         }}
       >

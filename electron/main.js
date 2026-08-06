@@ -157,7 +157,10 @@ async function boot() {
 
   attachContextMenu(mainWindow);
 
-  await mainWindow.loadURL(`http://127.0.0.1:${port}`);
+  // Tell the frontend it's inside the frameless shell, so it leaves room for
+  // the traffic lights. A browser (the iPad) gets no such marker and reclaims
+  // that strip. HashRouter keeps the query string across navigation.
+  await mainWindow.loadURL(`http://127.0.0.1:${port}/?shell=electron`);
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
