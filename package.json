@@ -1,0 +1,71 @@
+{
+  "name": "bloom-local",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bloom — a local AI tutor powered by your Claude Code subscription",
+  "main": "electron/main.js",
+  "type": "module",
+  "scripts": {
+    "postinstall": "electron-rebuild -f -w better-sqlite3",
+    "dev": "concurrently -k -n server,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "ELECTRON_RUN_AS_NODE=1 electron server/standalone.js",
+    "dev:web": "vite --config web/vite.config.js",
+    "build": "vite build --config web/vite.config.js",
+    "start": "npm run build && electron .",
+    "app": "electron .",
+    "serve": "npm run build && ELECTRON_RUN_AS_NODE=1 electron server/standalone.js",
+    "dist": "npm run build && node electron/bake-data-dir.js && electron-builder --mac --dir",
+    "dist:dmg": "npm run build && node electron/bake-data-dir.js && electron-builder --mac"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "pdf-parse": "^1.1.1"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
+    "katex": "^0.16.19",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^9.0.3",
+    "react-router-dom": "^7.1.1",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.0",
+    "remark-math": "^6.0.0",
+    "vite": "^6.0.7"
+  },
+  "build": {
+    "appId": "com.local.bloom",
+    "productName": "Bloom",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "server/**/*",
+      "web/dist/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "mac": {
+      "category": "public.app-category.education",
+      "icon": "build/icon.icns",
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    }
+  }
+}

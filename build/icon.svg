@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!--
+    Bloom app icon. Six-petal flower, following the upstream Bloom mark, redrawn
+    in this app's warm palette: cream petals on an amber-to-terracotta squircle.
+    Cream-on-warm rather than the reverse so it stays legible at 16px and does
+    not disappear against a light Dock.
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0%"   stop-color="#F0C775"/>
+      <stop offset="45%"  stop-color="#DF9B4E"/>
+      <stop offset="100%" stop-color="#BE6733"/>
+    </linearGradient>
+
+    <radialGradient id="sheen" cx="0.32" cy="0.22" r="0.85">
+      <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.34"/>
+      <stop offset="55%"  stop-color="#FFFFFF" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- One petal, pointing up from the flower centre. -->
+    <path id="petal"
+          d="M 0 -32
+             C 62 -104, 74 -196, 0 -286
+             C -74 -196, -62 -104, 0 -32 Z"/>
+  </defs>
+
+  <!-- macOS squircle: 824x824 content box centred on the 1024 canvas. -->
+  <g>
+    <rect x="100" y="100" width="824" height="824" rx="202" ry="202" fill="url(#bg)"/>
+    <rect x="100" y="100" width="824" height="824" rx="202" ry="202" fill="url(#sheen)"/>
+  </g>
+
+  <!-- Flower: six petals at 60° intervals, alternating opacity for depth. -->
+  <g transform="translate(512 512)" fill="#FFFDF7">
+    <use href="#petal" opacity="0.97" transform="rotate(0)"/>
+    <use href="#petal" opacity="0.80" transform="rotate(60)"/>
+    <use href="#petal" opacity="0.92" transform="rotate(120)"/>
+    <use href="#petal" opacity="0.78" transform="rotate(180)"/>
+    <use href="#petal" opacity="0.90" transform="rotate(240)"/>
+    <use href="#petal" opacity="0.83" transform="rotate(300)"/>
+    <circle r="66" fill="#FFFDF7"/>
+    <circle r="34" fill="#C4703A" opacity="0.85"/>
+  </g>
+</svg>

@@ -1,0 +1,8 @@
+node_modules/
+web/dist/
+release/
+data/
+electron/data-dir.json
+"Bloom Data"/
+.DS_Store
+*.log
