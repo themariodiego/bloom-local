@@ -1,0 +1,164 @@
+name: Release
+
+# Builds the downloadable installers.
+#   - Push a tag like v1.2.3 → build all three, then publish them as a GitHub
+#     Release. The tag must match the version in package.json.
+#   - Run manually (Actions → Release → Run workflow) → build all three and
+#     attach them to the run as artifacts only, so they can be tried before
+#     tagging. No release is created.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per ref. A manual test build is superseded by a newer one; a tagged
+# release is never cancelled halfway through.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each installer is built on its own architecture, so better-sqlite3
+        # (a native module) is never cross-compiled.
+        include:
+          - name: macOS (Apple silicon)
+            os: macos-latest
+            arch: arm64
+            script: dist:release:mac
+            artifact: release/Bloom-*-mac-arm64.dmg
+          - name: macOS (Intel)
+            os: macos-26-intel
+            arch: x64
+            script: dist:release:mac
+            artifact: release/Bloom-*-mac-x64.dmg
+          - name: Windows (x64)
+            os: windows-latest
+            arch: x64
+            script: dist:release:win
+            artifact: release/Bloom-*-windows-x64-setup.exe
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check the tag matches package.json
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+
+      - name: Check the runner architecture
+        shell: bash
+        run: |
+          arch=$(node -p process.arch)
+          if [ "$arch" != "${{ matrix.arch }}" ]; then
+            echo "::error::Expected a ${{ matrix.arch }} runner, got $arch"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build installer
+        run: npm run ${{ matrix.script }}
+        env:
+          # No Apple Developer ID: never pick up a certificate by accident.
+          # The macOS build is ad-hoc signed by scripts/mac-adhoc-sign.js.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installer-${{ runner.os }}-${{ matrix.arch }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release:
+    name: Publish release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the tag matches package.json
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: installer-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          files=(
+            "dist/Bloom-$VERSION-mac-arm64.dmg"
+            "dist/Bloom-$VERSION-mac-x64.dmg"
+            "dist/Bloom-$VERSION-windows-x64-setup.exe"
+          )
+          ls -l dist
+          for f in "${files[@]}"; do
+            [ -f "$f" ] || { echo "::error::Missing $f"; exit 1; }
+          done
+
+          readme="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY#opening-bloom-the-first-time"
+          notes=$(cat <<EOF
+          ## Which file do I need?
+
+          | File | For |
+          |------|-----|
+          | \`Bloom-$VERSION-mac-arm64.dmg\` | Mac with Apple silicon (M1 or later) |
+          | \`Bloom-$VERSION-mac-x64.dmg\` | Mac with an Intel processor |
+          | \`Bloom-$VERSION-windows-x64-setup.exe\` | Windows 10 or 11, 64-bit |
+
+          Bloom runs on your Claude Code subscription: the Claude Code CLI must be
+          installed and signed in (paid Claude plan) before you start it.
+
+          These builds are not code-signed, so macOS and Windows warn the first time
+          you open Bloom. See [opening Bloom the first time]($readme).
+          EOF
+          )
+
+          # Safe to re-run: if the release already exists, replace its assets.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${files[@]}" --clobber
+          else
+            gh release create "$TAG" "${files[@]}" \
+              --verify-tag \
+              --title "Bloom $TAG" \
+              --notes "$notes" \
+              --generate-notes
+          fi

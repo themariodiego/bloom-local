@@ -21,6 +21,8 @@
     "dist": "npm run build && node electron/bake-data-dir.js && electron-builder --dir",
     "dist:dmg": "npm run build && node electron/bake-data-dir.js && electron-builder --mac",
     "dist:win": "npm run build && node electron/bake-data-dir.js && electron-builder --win",
+    "dist:release:mac": "npm run build && node electron/bake-data-dir.js --release && electron-builder --mac --publish never -c.mac.identity=null -c.afterPack=./scripts/mac-adhoc-sign.js",
+    "dist:release:win": "npm run build && node electron/bake-data-dir.js --release && electron-builder --win --publish never",
     "smoke": "node scripts/smoke.js"
   },
   "dependencies": {
@@ -61,6 +63,7 @@
     "extraMetadata": {
       "main": "electron/main.js"
     },
+    "publish": null,
     "mac": {
       "category": "public.app-category.education",
       "icon": "build/icon.icns",
@@ -69,6 +72,14 @@
     "win": {
       "icon": "build/icon.png",
       "target": "nsis"
+    },
+    "dmg": {
+      "artifactName": "Bloom-${version}-mac-${arch}.${ext}",
+      "writeUpdateInfo": false
+    },
+    "nsis": {
+      "artifactName": "Bloom-${version}-windows-${arch}-setup.${ext}",
+      "differentialPackage": false
     }
   }
 }

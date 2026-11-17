@@ -18,7 +18,68 @@ machine. Three things are different from upstream:
 
 ---
 
-## Install on macOS
+## Download
+
+The quickest way in: download an installer from the
+[latest release](https://github.com/themariodiego/bloom-local/releases/latest)
+and pick the file for your computer.
+
+| Your computer | File |
+|---------------|------|
+| Mac with Apple silicon (M1 or later) | `Bloom-<version>-mac-arm64.dmg` |
+| Mac with an Intel processor | `Bloom-<version>-mac-x64.dmg` |
+| Windows 10 or 11, 64-bit | `Bloom-<version>-windows-x64-setup.exe` |
+
+Not sure which Mac you have? Apple menu → **About This Mac**: "Chip: Apple M…"
+means Apple silicon, "Processor: … Intel …" means Intel.
+
+The installer contains everything Bloom needs except Claude Code. You don't need
+Node.js or Git for this route, but you do need **Claude Code installed and signed
+in**, with a paid Claude plan (Pro, Max, Team or Enterprise). Step 3 of
+[Run from source on macOS](#run-from-source-on-macos) or
+[on Windows](#run-from-source-on-windows) shows how; skip the other steps.
+
+- **macOS:** open the `.dmg` and drag Bloom into Applications.
+- **Windows:** run the installer. It installs for your user account only (no
+  administrator rights needed) and adds a Start menu entry.
+
+To update, download the new version and install it over the old one. Your
+courses live outside the app (see [Where your data lives](#where-your-data-lives)),
+so they carry over.
+
+### Opening Bloom the first time
+
+The installers are **not code-signed** — that takes a paid Apple Developer ID
+and a Windows code-signing certificate — so both systems warn the first time you
+open Bloom. You only have to get past this once.
+
+**macOS.** Double-clicking Bloom shows *"Bloom" Not Opened — Apple could not
+verify "Bloom" is free of malware that may harm your Mac or compromise your
+privacy.* Click **Done**, then:
+
+1. Open **System Settings → Privacy & Security** and scroll down to the
+   Security section, where it says *"Bloom" was blocked to protect your Mac.*
+2. Click **Open Anyway** and confirm with your password or Touch ID.
+3. Click **Open Anyway** once more in the dialog that follows.
+
+Control-click → Open no longer gets you past this on macOS 15 Sequoia and later;
+use the steps above. Or, in Terminal, once Bloom is in Applications:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Bloom.app
+```
+
+That removes the "downloaded from the internet" flag Gatekeeper checks, and
+Bloom opens normally from then on. (If macOS ever says Bloom "is damaged and
+can't be opened", the same command fixes it.)
+
+**Windows.** SmartScreen shows *Windows protected your PC*. Click **More info**,
+then **Run anyway**. Your browser may also flag the download as uncommon; choose
+**Keep**.
+
+---
+
+## Run from source on macOS
 
 1. **Install Node.js 22 or newer** from <https://nodejs.org> (the LTS installer is
    fine). Check it in Terminal:
@@ -70,7 +131,7 @@ From then on, `npm start` in that folder is all you need. To get a proper
 
 ---
 
-## Install on Windows
+## Run from source on Windows
 
 Bloom was built on macOS. On Windows, installing, building and starting the
 server are checked automatically on every push (see the CI badge); the app
@@ -247,6 +308,8 @@ it, overhead is roughly 140 tokens. Worth knowing if you ever edit
 | `npm run dist` | Build an unpacked app for the current platform into `release/` |
 | `npm run dist:dmg` | Build a macOS `.dmg` installer |
 | `npm run dist:win` | Build a Windows installer (`.exe`, NSIS) |
+| `npm run dist:release:mac` | Build the downloadable macOS `.dmg`: ad-hoc signed, data in the per-user folder (what the release workflow runs) |
+| `npm run dist:release:win` | Build the downloadable Windows installer, data in the per-user folder (what the release workflow runs) |
 | `npm run smoke` | Start the server against a temporary data directory and check it responds (what CI runs) |
 
 Prefer a browser tab to the app window? `npm run serve`, then open
@@ -276,16 +339,19 @@ can mangle.
 npm run dist:win
 ```
 
-The installer (`Bloom Setup <version>.exe`) appears in `release/`. Run it, and
-Bloom gets a Start menu entry.
+The installer (`Bloom-<version>-windows-x64-setup.exe`) appears in `release/`.
+Run it, and Bloom gets a Start menu entry.
 
 Either way, the installed app keeps using the same database as `npm start`, so
 your courses follow you.
 
-These builds are **unsigned**. That's fine on the machine you built them on, but
-if you copy a build to another computer, macOS Gatekeeper and Windows SmartScreen
-will warn that it's from an unidentified developer. Building on the machine
-you'll run it on avoids that.
+These builds are for the machine you build them on. They're unsigned, which
+doesn't matter there, and they point at your checkout's `data/` folder, which
+doesn't exist anywhere else. To give Bloom to someone else, send them to the
+[downloads](#download) instead: those are built by
+`.github/workflows/release.yml` when a `v<version>` tag matching `package.json`
+is pushed, keep their data in the per-user folder, and come with the first-open
+steps above.
 
 ---
 
@@ -324,8 +390,17 @@ data/
 └── scratch/     empty working directory handed to the CLI
 ```
 
-A packaged app reuses the checkout's `data/` folder, recorded when you built it.
-If that folder is gone (you moved or deleted the checkout), it falls back to:
+Installed from a [download](#download), the same three items live in your
+per-user app-data folder:
+
+- **macOS:** `~/Library/Application Support/bloom-local/data`
+- **Windows:** `%APPDATA%\bloom-local\data`
+
+Uninstalling or replacing the app leaves that folder alone.
+
+An app you built yourself with `npm run dist` (or `dist:dmg` / `dist:win`)
+reuses the checkout's `data/` folder, recorded when you built it. If that folder
+is gone (you moved or deleted the checkout), it falls back to:
 
 - **macOS:** a `Bloom Data` folder beside `Bloom.app`
 - **Windows:** `%APPDATA%\bloom-local\data`
@@ -334,7 +409,7 @@ Nothing leaves your machine except the prompts sent to Claude (or Codex, if you
 pick a GPT model). The server binds to `127.0.0.1` and is not reachable from the
 network.
 
-To start over, delete `data/` — it rebuilds itself on next launch. To put the
+To start over, delete the data folder — it rebuilds itself on next launch. To put the
 data somewhere else, set `BLOOM_DATA_DIR`, which overrides everything above.
 
 macOS (bash or zsh):

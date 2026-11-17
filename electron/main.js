@@ -41,24 +41,36 @@ process.env.PATH = [
 /**
  * Choose where Bloom keeps its data, honouring "everything stays local".
  *   - running from source  → app/data/, beside the code
- *   - packaged .app        → "Bloom Data" beside the .app bundle, since the
- *                            bundle itself is read-only
- *   - packaged, elsewhere  → the per-user app-data folder (an installed
- *                            Program Files directory isn't writable either)
+ *   - downloaded installer → the per-user app-data folder (release builds,
+ *                            baked with `bake-data-dir.js --release`)
+ *   - local build          → the checkout's data/ recorded at build time;
+ *                            if that's gone, "Bloom Data" beside the .app
+ *                            bundle on macOS (the bundle itself is
+ *                            read-only), the per-user app-data folder
+ *                            elsewhere (Program Files isn't writable either)
  * Override any of them with BLOOM_DATA_DIR.
  */
 function resolveDataDir() {
   if (process.env.BLOOM_DATA_DIR) return process.env.BLOOM_DATA_DIR;
   if (!app.isPackaged) return path.join(here, '..', 'data');
 
-  // Prefer the checkout's data directory recorded at build time, so the
-  // packaged app and `npm start` share one database.
+  let baked = null;
   try {
-    const baked = JSON.parse(
-      readFileSync(path.join(here, 'data-dir.json'), 'utf8'),
-    ).dataDir;
-    accessSync(path.dirname(baked), fsConstants.W_OK);
-    return baked;
+    baked = JSON.parse(readFileSync(path.join(here, 'data-dir.json'), 'utf8'));
+  } catch {
+    // Not baked — handled by the fallback below.
+  }
+
+  // A distributed build can't know any path on the machine it lands on, and
+  // anything beside the bundle may be read-only (a mounted .dmg, Gatekeeper's
+  // App Translocation), so it always uses the per-user app-data folder.
+  if (baked?.release) return path.join(app.getPath('userData'), 'data');
+
+  // Local build: prefer the checkout's data directory recorded at build time,
+  // so the packaged app and `npm start` share one database.
+  try {
+    accessSync(path.dirname(baked.dataDir), fsConstants.W_OK);
+    return baked.dataDir;
   } catch {
     // Checkout moved or deleted — fall back to a folder beside the bundle.
     // .../Bloom.app/Contents/MacOS/Bloom → the folder holding Bloom.app
