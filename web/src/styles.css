@@ -22,8 +22,8 @@
   --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua',
            Georgia, 'Times New Roman', serif;
   --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue',
-          Helvetica, Arial, sans-serif;
-  --mono: 'SF Mono', ui-monospace, Menlo, Monaco, 'Courier New', monospace;
+          'Segoe UI', Helvetica, Arial, sans-serif;
+  --mono: 'SF Mono', ui-monospace, Menlo, Monaco, Consolas, 'Courier New', monospace;
 
   --r-sm: 8px;
   --r-md: 14px;

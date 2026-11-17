@@ -8,27 +8,44 @@ import { readFileSync, accessSync, constants as fsConstants } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const isMac = process.platform === 'darwin';
 
 // A GUI launch inherits a minimal PATH, so the `claude` binary would be
 // invisible. Put the usual install locations back before anything spawns it.
-const EXTRA_PATH = [
-  '/usr/local/bin',
-  '/opt/homebrew/bin',
-  path.join(app.getPath('home'), '.local/bin'),
-  path.join(app.getPath('home'), '.claude/local'),
-  path.join(app.getPath('home'), '.bun/bin'),
-  path.join(app.getPath('home'), '.npm-global/bin'),
-];
-process.env.PATH = [...new Set([...(process.env.PATH || '').split(':'), ...EXTRA_PATH])]
+const home = app.getPath('home');
+const EXTRA_PATH =
+  process.platform === 'win32'
+    ? [
+        // Native installer (claude.exe), npm global shims, WinGet links.
+        path.join(home, '.local', 'bin'),
+        path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'npm'),
+        path.join(
+          process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'),
+          'Microsoft', 'WinGet', 'Links',
+        ),
+      ]
+    : [
+        '/usr/local/bin',
+        '/opt/homebrew/bin',
+        path.join(home, '.local/bin'),
+        path.join(home, '.claude/local'),
+        path.join(home, '.bun/bin'),
+        path.join(home, '.npm-global/bin'),
+      ];
+process.env.PATH = [
+  ...new Set([...(process.env.PATH || '').split(path.delimiter), ...EXTRA_PATH]),
+]
   .filter(Boolean)
-  .join(':');
+  .join(path.delimiter);
 
 /**
  * Choose where Bloom keeps its data, honouring "everything stays local".
  *   - running from source  → app/data/, beside the code
  *   - packaged .app        → "Bloom Data" beside the .app bundle, since the
  *                            bundle itself is read-only
- * Override either with BLOOM_DATA_DIR.
+ *   - packaged, elsewhere  → the per-user app-data folder (an installed
+ *                            Program Files directory isn't writable either)
+ * Override any of them with BLOOM_DATA_DIR.
  */
 function resolveDataDir() {
   if (process.env.BLOOM_DATA_DIR) return process.env.BLOOM_DATA_DIR;
@@ -45,7 +62,10 @@ function resolveDataDir() {
   } catch {
     // Checkout moved or deleted — fall back to a folder beside the bundle.
     // .../Bloom.app/Contents/MacOS/Bloom → the folder holding Bloom.app
-    return path.join(path.dirname(app.getPath('exe')), '..', '..', '..', 'Bloom Data');
+    if (isMac) {
+      return path.join(path.dirname(app.getPath('exe')), '..', '..', '..', 'Bloom Data');
+    }
+    return path.join(app.getPath('userData'), 'data');
   }
 }
 
@@ -98,18 +118,22 @@ function attachContextMenu(win) {
       menu.append(new MenuItem({ role: 'paste', enabled: params.editFlags.canPaste }));
       menu.append(new MenuItem({ role: 'selectAll' }));
       menu.append(new MenuItem({ type: 'separator' }));
-      menu.append(
-        new MenuItem({
-          label: 'Substitutions',
-          submenu: [
-            { role: 'showSubstitutions' },
-            { type: 'separator' },
-            { role: 'toggleSmartQuotes' },
-            { role: 'toggleSmartDashes' },
-            { role: 'toggleTextReplacement' },
-          ],
-        }),
-      );
+      // These roles are wired to native macOS text services; elsewhere they
+      // would render as items that do nothing.
+      if (isMac) {
+        menu.append(
+          new MenuItem({
+            label: 'Substitutions',
+            submenu: [
+              { role: 'showSubstitutions' },
+              { type: 'separator' },
+              { role: 'toggleSmartQuotes' },
+              { role: 'toggleSmartDashes' },
+              { role: 'toggleTextReplacement' },
+            ],
+          }),
+        );
+      }
       menu.append(new MenuItem({ role: 'toggleSpellChecker' }));
     } else if (params.selectionText) {
       menu.append(new MenuItem({ role: 'copy' }));
@@ -140,8 +164,12 @@ async function boot() {
     minHeight: 600,
     title: 'Bloom',
     backgroundColor: '#F7F5F0',
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 18, y: 22 },
+    // macOS gets the inset traffic lights over our own chrome; Windows and
+    // Linux keep their native frame, minus the File/Edit menu bar we don't use
+    // (Alt still reveals it).
+    ...(isMac
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 22 } }
+      : { autoHideMenuBar: true }),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -159,8 +187,12 @@ async function boot() {
 
   // Tell the frontend it's inside the frameless shell, so it leaves room for
   // the traffic lights. A browser (the iPad) gets no such marker and reclaims
-  // that strip. HashRouter keeps the query string across navigation.
-  await mainWindow.loadURL(`http://127.0.0.1:${port}/?shell=electron`);
+  // that strip. HashRouter keeps the query string across navigation. Only the
+  // macOS window is frameless; elsewhere the native title bar already
+  // provides the drag area, so load the page as a browser would.
+  await mainWindow.loadURL(
+    `http://127.0.0.1:${port}/${isMac ? '?shell=electron' : ''}`,
+  );
   mainWindow.on('closed', () => {
     mainWindow = null;
   });

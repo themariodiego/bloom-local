@@ -1,8 +1,26 @@
+# Dependencies and build output
 node_modules/
 web/dist/
 release/
+
+# Your courses, uploads and database — never commit these
 data/
+Bloom Data/
 electron/data-dir.json
-"Bloom Data"/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# OS clutter
 .DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors and tools
+.vscode/
+.idea/
+.claude/
+
 *.log

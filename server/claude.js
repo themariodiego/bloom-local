@@ -12,7 +12,8 @@
  * that down to just our own prompt, which is ~140 tokens of overhead.
  */
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { SCRATCH_DIR } from './paths.js';
@@ -88,33 +89,91 @@ export function resolveModel(requested) {
 let cachedBin = null;
 export function claudeBinary() {
   if (cachedBin) return cachedBin;
-
-  const candidates = [
-    process.env.CLAUDE_CLI_PATH,
-    ...(process.env.PATH || '')
-      .split(path.delimiter)
-      .filter(Boolean)
-      .map((dir) => path.join(dir, 'claude')),
-    '/usr/local/bin/claude',
-    '/opt/homebrew/bin/claude',
-    path.join(os.homedir(), '.local/bin/claude'),
-    path.join(os.homedir(), '.claude/local/claude'),
-    path.join(os.homedir(), '.bun/bin/claude'),
-    path.join(os.homedir(), '.npm-global/bin/claude'),
-  ].filter(Boolean);
-
-  for (const candidate of candidates) {
-    try {
-      if (existsSync(candidate)) {
-        cachedBin = candidate;
-        return cachedBin;
+  cachedBin = resolveClaudeBinary({
+    platform: process.platform,
+    arch: process.arch,
+    env: process.env,
+    homedir: os.homedir(),
+    exists: (file) => {
+      try {
+        return existsSync(file);
+      } catch {
+        return false;
       }
-    } catch {
-      /* keep probing */
+    },
+  });
+  return cachedBin;
+}
+
+/**
+ * The search behind claudeBinary(), with the OS passed in so the Windows
+ * branch can be exercised anywhere against a fake filesystem. Returns the
+ * first candidate that exists, else bare 'claude' for spawn to look up.
+ */
+export function resolveClaudeBinary({ platform, arch = 'x64', env, homedir, exists }) {
+  if (platform !== 'win32') {
+    const p = path.posix;
+    const candidates = [
+      env.CLAUDE_CLI_PATH,
+      ...(env.PATH || '')
+        .split(':')
+        .filter(Boolean)
+        .map((dir) => p.join(dir, 'claude')),
+      '/usr/local/bin/claude',
+      '/opt/homebrew/bin/claude',
+      p.join(homedir, '.local/bin/claude'),
+      p.join(homedir, '.claude/local/claude'),
+      p.join(homedir, '.bun/bin/claude'),
+      p.join(homedir, '.npm-global/bin/claude'),
+    ].filter(Boolean);
+    return candidates.find((c) => exists(c)) ?? 'claude';
+  }
+
+  // Windows. Only a real .exe will do: Node refuses to spawn a .cmd without a
+  // shell (EINVAL), and routing through cmd.exe can't carry arbitrary
+  // arguments safely. npm installs give us exactly such a shim, so look
+  // through it to the native binary the package ships.
+  const w = path.win32;
+  if (env.CLAUDE_CLI_PATH && exists(env.CLAUDE_CLI_PATH)) return env.CLAUDE_CLI_PATH;
+
+  const home = env.USERPROFILE || homedir;
+  const appData = env.APPDATA || w.join(home, 'AppData', 'Roaming');
+  const localAppData = env.LOCALAPPDATA || w.join(home, 'AppData', 'Local');
+  const dirs = [
+    ...windowsPathDirs(env),
+    w.join(home, '.local', 'bin'), // native installer
+    w.join(appData, 'npm'), // npm global prefix
+    w.join(localAppData, 'Microsoft', 'WinGet', 'Links'),
+    w.join(home, '.bun', 'bin'),
+  ];
+
+  for (const dir of dirs) {
+    const exe = w.join(dir, 'claude.exe');
+    if (exists(exe)) return exe;
+    if (exists(w.join(dir, 'claude.cmd'))) {
+      // npm's shim lives in the prefix, with the package under node_modules.
+      // The per-platform optional dependency holds the real binary (nested,
+      // or hoisted beside the package); bin/claude.exe is the copy the
+      // postinstall drops over a placeholder, so it's only trusted last.
+      const scope = w.join(dir, 'node_modules', '@anthropic-ai');
+      const native = `claude-code-win32-${arch === 'arm64' ? 'arm64' : 'x64'}`;
+      const found = [
+        w.join(scope, 'claude-code', 'node_modules', '@anthropic-ai', native, 'claude.exe'),
+        w.join(scope, native, 'claude.exe'),
+        w.join(scope, 'claude-code', 'bin', 'claude.exe'),
+      ].find((c) => exists(c));
+      if (found) return found;
     }
   }
-  cachedBin = 'claude';
-  return cachedBin;
+  return 'claude';
+}
+
+/** PATH entries on Windows: `;`-separated, sometimes quoted, key spelled `Path`. */
+export function windowsPathDirs(env) {
+  return (env.PATH ?? env.Path ?? '')
+    .split(';')
+    .map((dir) => dir.trim().replace(/^"(.*)"$/, '$1'))
+    .filter(Boolean);
 }
 
 function buildArgs(model) {
@@ -197,7 +256,36 @@ export function runClaude({ system, prompt, model, onDelta, signal }) {
     return runCodex({ system, prompt, model: chosen, effort: entry.effort, onDelta, signal });
   }
   const args = buildArgs(chosen);
-  if (system) args.push('--system-prompt', system);
+
+  // The system prompt goes in a temp file, not argv. Prompts that embed a
+  // syllabus, earlier lessons or source material run to hundreds of KB, past
+  // Windows' 32,767-character command line and Linux's 128 KB per-argument
+  // cap. Doing it for every call, on every OS, keeps a single code path that
+  // the health check exercises.
+  let systemFile = null;
+  const removeSystemFile = () => {
+    if (!systemFile) return;
+    try {
+      rmSync(systemFile, { force: true });
+      systemFile = null;
+    } catch {
+      /* still open on Windows — the close handler tries again */
+    }
+  };
+  if (system) {
+    try {
+      systemFile = path.join(os.tmpdir(), `bloom-system-${randomUUID()}.md`);
+      writeFileSync(systemFile, system, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    } catch (err) {
+      return Promise.reject(
+        new ClaudeError('Could not write the system prompt to a temporary file.', {
+          kind: 'cli_error',
+          detail: String(err),
+        }),
+      );
+    }
+    args.push('--system-prompt-file', systemFile);
+  }
 
   return new Promise((resolve, reject) => {
     let child;
@@ -217,6 +305,7 @@ export function runClaude({ system, prompt, model, onDelta, signal }) {
         },
       });
     } catch (err) {
+      removeSystemFile();
       reject(
         new ClaudeError(
           'Could not launch the Claude Code CLI. Install it, or set CLAUDE_CLI_PATH.',
@@ -245,6 +334,7 @@ export function runClaude({ system, prompt, model, onDelta, signal }) {
     };
 
     child.on('error', (err) => {
+      removeSystemFile();
       finish(
         reject,
         new ClaudeError(
@@ -291,6 +381,7 @@ export function runClaude({ system, prompt, model, onDelta, signal }) {
     });
 
     child.on('close', (code) => {
+      removeSystemFile();
       if (resultEvent && resultEvent.is_error === false) {
         // Prefer the streamed text; fall back to the result field if no
         // partial messages came through.

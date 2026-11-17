@@ -1,0 +1,8 @@
+# Keep LF line endings everywhere, including Windows checkouts, so files are
+# byte-identical across platforms.
+* text=auto eol=lf
+
+# Binary assets: never normalise or diff as text.
+*.png binary
+*.icns binary
+*.ico binary

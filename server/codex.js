@@ -18,7 +18,7 @@ import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { SCRATCH_DIR } from './paths.js';
-import { ClaudeError } from './claude.js';
+import { ClaudeError, windowsPathDirs } from './claude.js';
 
 const DEVELOPER_INSTRUCTIONS = [
   'You are the text-generation backend of Bloom, a tutoring app.',
@@ -35,6 +35,22 @@ const DEVELOPER_INSTRUCTIONS = [
 let cachedBin = null;
 export function codexBinary() {
   if (cachedBin) return cachedBin;
+
+  if (process.platform === 'win32') {
+    cachedBin = resolveCodexBinaryWindows({
+      arch: process.arch,
+      env: process.env,
+      homedir: os.homedir(),
+      exists: (file) => {
+        try {
+          return existsSync(file);
+        } catch {
+          return false;
+        }
+      },
+    });
+    return cachedBin;
+  }
 
   const launchers = [
     process.env.CODEX_CLI_PATH,
@@ -83,6 +99,42 @@ function nativeBinaryFor(launcherPath) {
     /* fall through */
   }
   return null;
+}
+
+/**
+ * Windows counterpart of the search above, with the OS passed in so it can be
+ * tested anywhere against a fake filesystem. npm leaves a `codex.cmd` shim,
+ * which Node can't spawn without a shell, so go from the shim's directory to
+ * the native codex.exe in the matching optional package — the same vendor
+ * layout bin/codex.js resolves at run time.
+ */
+export function resolveCodexBinaryWindows({ arch = 'x64', env, homedir, exists }) {
+  const w = path.win32;
+  if (env.CODEX_CLI_PATH && exists(env.CODEX_CLI_PATH)) return env.CODEX_CLI_PATH;
+
+  const home = env.USERPROFILE || homedir;
+  const appData = env.APPDATA || w.join(home, 'AppData', 'Roaming');
+  const [pkgArch, triple] =
+    arch === 'arm64'
+      ? ['arm64', 'aarch64-pc-windows-msvc']
+      : ['x64', 'x86_64-pc-windows-msvc'];
+  const native = `codex-win32-${pkgArch}`;
+
+  for (const dir of [...windowsPathDirs(env), w.join(appData, 'npm'), w.join(home, '.bun', 'bin')]) {
+    const exe = w.join(dir, 'codex.exe');
+    if (exists(exe)) return exe;
+    if (!exists(w.join(dir, 'codex.cmd'))) continue;
+    const scope = w.join(dir, 'node_modules', '@openai');
+    const found = [
+      w.join(scope, 'codex', 'node_modules', '@openai', native), // nested
+      w.join(scope, native), // hoisted
+      w.join(scope, 'codex'), // older releases vendored the binary in-package
+    ]
+      .map((pkg) => w.join(pkg, 'vendor', triple, 'bin', 'codex.exe'))
+      .find((c) => exists(c));
+    if (found) return found;
+  }
+  return 'codex';
 }
 
 function buildArgs(model, effort) {

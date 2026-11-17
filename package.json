@@ -5,18 +5,23 @@
   "description": "Bloom — a local AI tutor powered by your Claude Code subscription",
   "main": "electron/main.js",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "dev": "concurrently -k -n server,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
-    "dev:server": "ELECTRON_RUN_AS_NODE=1 electron server/standalone.js",
+    "dev:server": "node scripts/electron-node.js server/standalone.js",
     "dev:web": "vite --config web/vite.config.js",
     "build": "vite build --config web/vite.config.js",
     "start": "npm run build && electron .",
     "app": "electron .",
-    "serve": "npm run build && ELECTRON_RUN_AS_NODE=1 electron server/standalone.js",
+    "serve": "npm run build && node scripts/electron-node.js server/standalone.js",
     "serve:her": "BLOOM_DATA_DIR=\"${BLOOM_HER_DIR:-$HOME/Bloom Data - Her}\" PORT=\"${PORT:-4318}\" ELECTRON_RUN_AS_NODE=1 electron server/standalone.js",
-    "dist": "npm run build && node electron/bake-data-dir.js && electron-builder --mac --dir",
-    "dist:dmg": "npm run build && node electron/bake-data-dir.js && electron-builder --mac"
+    "dist": "npm run build && node electron/bake-data-dir.js && electron-builder --dir",
+    "dist:dmg": "npm run build && node electron/bake-data-dir.js && electron-builder --mac",
+    "dist:win": "npm run build && node electron/bake-data-dir.js && electron-builder --win",
+    "smoke": "node scripts/smoke.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
@@ -59,14 +64,11 @@
     "mac": {
       "category": "public.app-category.education",
       "icon": "build/icon.icns",
-      "target": [
-        {
-          "target": "dir",
-          "arch": [
-            "arm64"
-          ]
-        }
-      ]
+      "target": "dmg"
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": "nsis"
     }
   }
 }
