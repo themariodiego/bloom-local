@@ -1,5 +1,8 @@
 /** Text utilities shared by the routes. */
 
+/** Split on any line ending. A stray \r otherwise defeats every line regex. */
+export const splitLines = (text) => String(text ?? '').split(/\r\n|\r|\n/);
+
 const FENCE_OPEN = /^```(?:markdown|md)?\s*\n?/i;
 const FENCE_CLOSE = /\n?```\s*$/;
 
@@ -13,7 +16,7 @@ export function stripFences(text) {
 }
 
 export function extractTitle(content, fallback = 'Untitled lesson') {
-  for (const line of (content ?? '').split('\n')) {
+  for (const line of splitLines(content)) {
     const m = line.match(/^#\s+(.+)$/);
     if (m) return m[1].trim();
   }
@@ -51,17 +54,35 @@ export function allMasteryDone(syllabus) {
   return total > 0 && done === total;
 }
 
-/** Read the `<!-- mastery: item; item -->` comment a lesson ends with. */
+/**
+ * Read the `<!-- mastery: item; item -->` comment a lesson ends with.
+ *
+ * Takes the LAST such comment, and forbids `-->` inside the captured span, so
+ * a stray `<!-- mastery:` earlier in the prose can't swallow the whole body.
+ */
 export function extractMasteryClaims(lessonContent) {
-  const m = (lessonContent ?? '').match(/<!--\s*mastery:\s*(.+?)\s*-->/s);
-  if (!m) return [];
-  return m[1]
+  const all = [...String(lessonContent ?? '').matchAll(/<!--\s*mastery:\s*((?:(?!-->)[\s\S])*?)\s*-->/g)];
+  if (all.length === 0) return [];
+  return all[all.length - 1][1]
     .split(';')
     .map((s) => s.trim())
     .filter(Boolean);
 }
 
-const escapePipes = (s) => String(s).replace(/\|/g, '\\|').replace(/\n+/g, ' ');
+/**
+ * Make arbitrary text safe inside a GFM table cell.
+ * Backslashes first — escaping pipes first would turn a trailing `\` into
+ * `\\|`, which GFM reads as an escaped backslash plus a live cell delimiter.
+ * Comment markers are neutralised because the renderer strips HTML comments.
+ */
+const escapeCell = (s) =>
+  String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
+    .replace(/<!--/g, '&lt;!--')
+    .replace(/-->/g, '--&gt;')
+    .replace(/\s+/g, ' ')
+    .trim();
 
 /**
  * Rebuild the syllabus "## Progress" table from the course's lessons.
@@ -71,14 +92,14 @@ const escapePipes = (s) => String(s).replace(/\|/g, '\\|').replace(/\n+/g, ' ');
  * always accurate and backfills courses that predate this.
  */
 export function withProgressTable(syllabus, lessons) {
-  const rows = (lessons ?? []).map((l) => {
+  const rows = (lessons ?? []).filter(Boolean).map((l) => {
     const items = extractMasteryClaims(l.content);
     const covered = items.length
-      ? items.map(escapePipes).join('; ')
+      ? items.map(escapeCell).join('; ')
       : l.is_evaluation
         ? 'Final assessment — no new items'
         : '—';
-    return `| ${String(l.number).padStart(2, '0')} · ${escapePipes(l.title || 'Untitled')} | ${covered} | ${(l.created_at ?? '').slice(0, 10)} |`;
+    return `| ${String(l.number).padStart(2, '0')} · ${escapeCell(l.title || 'Untitled')} | ${covered} | ${String(l.created_at ?? '').slice(0, 10)} |`;
   });
 
   const table = [
@@ -87,23 +108,41 @@ export function withProgressTable(syllabus, lessons) {
     ...(rows.length ? rows : ['| — | Nothing yet | — |']),
   ].join('\n');
 
-  const lines = (syllabus ?? '').split('\n');
-  const start = lines.findIndex((l) => /^##\s+Progress\s*$/i.test(l));
+  const lines = splitLines(syllabus);
+
+  // Find the heading, ignoring any that sits inside a fenced code block.
+  let start = -1;
+  let inFence = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^\s*(```|~~~)/.test(lines[i])) inFence = !inFence;
+    else if (!inFence && /^##\s+Progress\s*$/i.test(lines[i])) {
+      start = i;
+      break;
+    }
+  }
 
   if (start === -1) {
     if (!syllabus) return syllabus;
     return `${syllabus.trimEnd()}\n\n## Progress\n\n${table}\n`;
   }
 
-  // Replace everything between the heading and the next `## ` heading.
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^##\s+/.test(lines[i])) {
-      end = i;
-      break;
-    }
-  }
-  return [...lines.slice(0, start + 1), '', table, '', ...lines.slice(end)].join('\n');
+  // Replace ONLY the existing table — blank lines and rows starting with `|`.
+  // Scanning to the next `## ` instead would swallow any h1/h3/prose that
+  // happens to follow, taking its mastery checkboxes with it.
+  let end = start + 1;
+  while (end < lines.length && lines[end].trim() === '') end += 1;
+  while (end < lines.length && /^\s*\|/.test(lines[end])) end += 1;
+
+  const tail = lines.slice(end);
+  // Keep exactly one blank line before whatever follows.
+  while (tail.length && tail[0].trim() === '') tail.shift();
+
+  return [
+    ...lines.slice(0, start + 1),
+    '',
+    table,
+    ...(tail.length ? ['', ...tail] : ['']),
+  ].join('\n');
 }
 
 /**
@@ -117,8 +156,7 @@ export function autoCheckMastery(syllabus, lessonContent) {
   const norm = (s) => s.toLowerCase().replace(/[\s.,;:!?…"'`]+/g, ' ').trim();
   const wanted = claimed.map(norm);
 
-  return (syllabus ?? '')
-    .split('\n')
+  return splitLines(syllabus)
     .map((line) => {
       const box = line.match(/^(\s*)- \[ \]\s+(.*)$/);
       if (!box) return line;
@@ -150,9 +188,20 @@ const MODULE_RE = /^###\s+(.+)$/;
 const normItem = (s) =>
   String(s).toLowerCase().replace(/[\s.,;:!?…"'`]+/g, ' ').trim();
 
+/**
+ * Flatten model-supplied item text to a single safe line.
+ *
+ * Without this, one `add` op whose text contains a newline injects extra
+ * syllabus lines — and if those parse as checkboxes the item count silently
+ * inflates. Collapsing all whitespace makes that structurally impossible.
+ */
+function sanitizeItemText(raw) {
+  return String(raw ?? '').replace(/\s+/g, ' ').trim();
+}
+
 /** Index a syllabus into its modules and checkbox items, in document order. */
 export function indexSyllabus(text) {
-  const lines = (text ?? '').split('\n');
+  const lines = splitLines(text);
   const items = [];
   const modules = [];
   let mid = 0;
@@ -199,8 +248,7 @@ export function revisionView(idx) {
 
 /** The exact set of ticked lines — the invariant that must survive a revision. */
 export function tickedLines(text) {
-  return (text ?? '')
-    .split('\n')
+  return splitLines(text)
     .filter((l) => /^\s*- \[[xX]\]/.test(l))
     .map((l) => l.trim());
 }
@@ -240,15 +288,31 @@ export function applySyllabusOps(syllabus, ops) {
     }
 
     if (op === 'add' || op === 'reword') {
-      const t = String(raw.text ?? '').trim();
+      const t = sanitizeItemText(raw.text);
       if (t.length < 12 || t.length > 400) {
         rejected.push('item text out of range');
+        continue;
+      }
+      // Markdown or comment syntax inside an item would change the document's
+      // structure rather than its content.
+      if (/[-*+]\s*\[[ xX]?\]/.test(t)) {
+        rejected.push('item text contains checkbox syntax');
+        continue;
+      }
+      if (/<!--|-->/.test(t)) {
+        rejected.push('item text contains an HTML comment');
+        continue;
+      }
+      if (/^#{1,6}\s/.test(t)) {
+        rejected.push('item text is a heading');
         continue;
       }
       if (/^(understand|be familiar|know about|learn about|get comfortable)\b/i.test(t)) {
         rejected.push('not a verifiable behaviour');
         continue;
       }
+      // Carry the cleaned text forward — the raw value is never used again.
+      raw.text = t;
       const n = normItem(t);
       const clash = live.some((e) =>
         op === 'reword' && e.id === Number(raw.id)

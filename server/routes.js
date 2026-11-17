@@ -104,6 +104,10 @@ async function streamGeneration(res, { system, prompt, model, onDone, preamble }
     // (used by the syllabus reviser, which must finish before the lesson).
     if (preamble) await preamble((payload) => sendSSE(res, payload), controller.signal);
 
+    // The preamble can take seconds. If the learner hit Cancel during it, stop
+    // here — otherwise we'd generate and save a lesson they already cancelled.
+    if (controller.signal.aborted) return;
+
     const raw = await runClaude({
       // A function defers building the prompt until after the preamble, so it
       // can pick up a syllabus the preamble revised.
@@ -678,7 +682,7 @@ async function reviseSyllabus({ course, syllabus, feedbackText, annotations, sig
         annotations: clampText(annotations, 8_000),
       }),
       prompt: 'Does the plan need to change?',
-      model: 'claude-haiku-4-5',
+      model: 'claude-haiku-5-5',
       signal,
     });
     const text = stripFences(raw);
@@ -693,6 +697,17 @@ async function reviseSyllabus({ course, syllabus, feedbackText, annotations, sig
   }
 
   if (!parsed || !Array.isArray(parsed.ops) || parsed.ops.length === 0) return null;
+
+  // The Haiku call above took seconds. Another writer (a second window, or the
+  // auto-tick at the end of a parallel "Done reading") may have touched the
+  // syllabus meanwhile. The ops are keyed to line indices from the snapshot, so
+  // applying them to changed text would edit the wrong items — and writing the
+  // result would revert whatever that other writer just earned.
+  const fresh = getSyllabus(course.id)?.content ?? syllabus;
+  if (fresh !== syllabus) {
+    console.warn('[bloom] syllabus changed while revising — revision discarded');
+    return null;
+  }
 
   const before = tickedLines(syllabus);
   const { text, applied, rejected } = applySyllabusOps(syllabus, parsed.ops);

@@ -57,7 +57,7 @@ function Rail({ courses, reload }) {
       </div>
 
       <div className="rail-foot">
-        Powered by your Claude Code subscription.
+        Powered by your Claude Code and ChatGPT subscriptions.
       </div>
     </nav>
   );
@@ -66,7 +66,7 @@ function Rail({ courses, reload }) {
 export default function App() {
   const [courses, setCourses] = useState([]);
   const [models, setModels] = useState([]);
-  const [defaultModel, setDefaultModel] = useState('claude-sonnet-5');
+  const [defaultModel, setDefaultModel] = useState('claude-opus-5-5');
   const [model, setModel] = useState(
     () => localStorage.getItem('bloom.model') ?? '',
   );

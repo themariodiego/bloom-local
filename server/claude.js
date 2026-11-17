@@ -16,39 +16,62 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { SCRATCH_DIR } from './paths.js';
+import { runCodex } from './codex.js';
 
-/** Models offered in the UI picker. `id` is passed straight to `--model`. */
+/**
+ * Models offered in the UI picker. `id` is passed straight to `--model` and
+ * `effort` to `--effort`. Always use full ids — the CLI's aliases lag behind
+ * new releases.
+ */
 export const MODELS = [
   {
-    id: 'claude-opus-5',
-    name: 'Opus 5',
+    id: 'claude-opus-5-5',
+    name: 'Opus 5.5',
     tagline: 'Deepest reasoning',
     blurb: 'Best for hard subjects and courses you want to go all the way down on.',
     tier: 'opus',
-  },
-  {
-    id: 'claude-sonnet-5',
-    name: 'Sonnet 5',
-    tagline: 'Balanced',
-    blurb: 'Near-Opus quality, noticeably faster. A good everyday default.',
-    tier: 'sonnet',
+    effort: 'medium',
     default: true,
   },
   {
-    id: 'claude-opus-4-8',
-    name: 'Opus 4.8',
-    tagline: 'Previous Opus',
-    blurb: 'The prior Opus generation — warm, clear writing.',
-    tier: 'opus',
+    id: 'claude-sonnet-5-5',
+    name: 'Sonnet 5.5',
+    tagline: 'Balanced',
+    blurb: 'Near-Opus quality, noticeably faster. A good everyday choice.',
+    tier: 'sonnet',
+    effort: 'medium',
   },
   {
-    id: 'claude-haiku-4-5',
-    name: 'Haiku 4.5',
+    id: 'claude-haiku-5-5',
+    name: 'Haiku 5.5',
     tagline: 'Fastest',
     blurb: 'Quick and light. Good for skimming a topic or short source material.',
     tier: 'haiku',
+    effort: 'medium',
+  },
+  // Served by the Codex CLI on the user's ChatGPT subscription (see codex.js).
+  {
+    id: 'gpt-6.1-sol',
+    name: 'GPT-6.1 Sol',
+    tagline: 'Codex · Extra High',
+    blurb: "OpenAI's latest Sol, reasoning at extra-high effort. Slower, and the lesson appears all at once.",
+    tier: 'sol',
+    provider: 'codex',
+    effort: 'xhigh',
+  },
+  {
+    id: 'gpt-6-astra',
+    name: 'GPT-6 Astra',
+    tagline: 'Codex · Extra High',
+    blurb: "OpenAI's latest Astra, reasoning at extra-high effort. Slower, and the lesson appears all at once.",
+    tier: 'astra',
+    provider: 'codex',
+    effort: 'xhigh',
   },
 ];
+
+/** Cheap model for background chores (health checks, syllabus revisions). */
+export const FAST_MODEL = 'claude-haiku-5-5';
 
 export const DEFAULT_MODEL =
   MODELS.find((m) => m.default)?.id ?? MODELS[0].id;
@@ -95,9 +118,11 @@ export function claudeBinary() {
 }
 
 function buildArgs(model) {
+  const effort = MODELS.find((m) => m.id === model)?.effort;
   return [
     '-p',
     '--model', model,
+    ...(effort ? ['--effort', effort] : []),
     '--output-format', 'stream-json',
     '--include-partial-messages',
     '--verbose',
@@ -167,6 +192,10 @@ function classifyFailure(stderr, resultEvent) {
  */
 export function runClaude({ system, prompt, model, onDelta, signal }) {
   const chosen = resolveModel(model);
+  const entry = MODELS.find((m) => m.id === chosen);
+  if (entry?.provider === 'codex') {
+    return runCodex({ system, prompt, model: chosen, effort: entry.effort, onDelta, signal });
+  }
   const args = buildArgs(chosen);
   if (system) args.push('--system-prompt', system);
 
@@ -181,6 +210,10 @@ export function runClaude({ system, prompt, model, onDelta, signal }) {
           // Keep the CLI from trying to render a TUI or ask anything.
           CI: '1',
           NO_COLOR: '1',
+          // An API key in the environment outranks the OAuth login and would
+          // silently bill the API instead of the subscription.
+          ANTHROPIC_API_KEY: undefined,
+          ANTHROPIC_AUTH_TOKEN: undefined,
         },
       });
     } catch (err) {
@@ -288,7 +321,7 @@ export async function checkClaude() {
     const text = await runClaude({
       system: 'Reply with exactly: ok',
       prompt: 'ping',
-      model: 'claude-haiku-4-5',
+      model: FAST_MODEL,
     });
     return { ok: true, reply: text.trim().slice(0, 40) };
   } catch (err) {

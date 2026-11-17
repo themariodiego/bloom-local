@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -55,6 +55,21 @@ export function Icon({ name, size = 16 }) {
 export function Popover({ trigger, children, align = 'down', menuClass = '' }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
+  const menuRef = useRef(null);
+  const [maxHeight, setMaxHeight] = useState(undefined);
+
+  // Keep the menu inside the window; it scrolls when the list is taller.
+  useLayoutEffect(() => {
+    if (!open || !menuRef.current) return undefined;
+    const fit = () => {
+      const rect = menuRef.current.getBoundingClientRect();
+      const room = align.includes('up') ? rect.bottom - 12 : window.innerHeight - rect.top - 12;
+      setMaxHeight(Math.max(160, room));
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [open, align]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -74,13 +89,23 @@ export function Popover({ trigger, children, align = 'down', menuClass = '' }) {
     <div className="pop" ref={ref}>
       {trigger(open, () => setOpen((v) => !v))}
       {open && (
-        <div className={`pop-menu ${align} ${menuClass}`}>
+        <div
+          ref={menuRef}
+          className={`pop-menu ${align} ${menuClass}`}
+          style={{ maxHeight, overflowY: 'auto' }}
+        >
           {typeof children === 'function' ? children(() => setOpen(false)) : children}
         </div>
       )}
     </div>
   );
 }
+
+
+const MODEL_GROUPS = [
+  { provider: 'claude', label: 'Claude · Claude Code' },
+  { provider: 'codex', label: 'OpenAI · Codex' },
+];
 
 export function ModelPicker({ models, value, onChange, align = 'down', compact }) {
   const current = models.find((m) => m.id === value) ?? models[0];
@@ -93,7 +118,7 @@ export function ModelPicker({ models, value, onChange, align = 'down', compact }
         <button
           className={`chip ${open ? 'on' : ''}`}
           onClick={toggle}
-          title="Which Claude model generates this"
+          title="Which model generates this"
         >
           <span className="dot" />
           {compact ? current.name : `Model · ${current.name}`}
@@ -102,29 +127,42 @@ export function ModelPicker({ models, value, onChange, align = 'down', compact }
     >
       {(close) => (
         <>
-          <div className="pop-label">Claude model</div>
-          {models.map((m) => (
-            <button
-              key={m.id}
-              className={`pop-item ${m.id === value ? 'on' : ''}`}
-              onClick={() => {
-                onChange(m.id);
-                close();
-              }}
-            >
-              <div className="row">
-                <span className="name grow">{m.name}</span>
-                <span className="tag">{m.tagline}</span>
-                {m.id === value && <Icon name="check" size={13} />}
+          {MODEL_GROUPS.map((g, i) => {
+            const group = models.filter((m) => (m.provider ?? 'claude') === g.provider);
+            if (!group.length) return null;
+            return (
+              <div key={g.provider}>
+                <div
+                  className="pop-label"
+                  style={i ? { borderTop: '1px solid var(--line-soft)', marginTop: 4 } : undefined}
+                >
+                  {g.label}
+                </div>
+                {group.map((m) => (
+                  <button
+                    key={m.id}
+                    className={`pop-item ${m.id === value ? 'on' : ''}`}
+                    onClick={() => {
+                      onChange(m.id);
+                      close();
+                    }}
+                  >
+                    <div className="row">
+                      <span className="name grow">{m.name}</span>
+                      <span className="tag">{m.tagline}</span>
+                      {m.id === value && <Icon name="check" size={13} />}
+                    </div>
+                    <div className="blurb">{m.blurb}</div>
+                  </button>
+                ))}
               </div>
-              <div className="blurb">{m.blurb}</div>
-            </button>
-          ))}
+            );
+          })}
           <div
             className="blurb"
             style={{ padding: '8px 11px 4px', borderTop: '1px solid var(--line-soft)', marginTop: 4 }}
           >
-            Runs through your Claude Code subscription — no API key.
+            Runs through your Claude Code and ChatGPT subscriptions — no API keys.
           </div>
         </>
       )}

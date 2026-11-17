@@ -312,12 +312,14 @@ export default function Home({ models, model, setModel, courses, reloadCourses }
           {files.length > 0 && (
             <div style={{ padding: '0 16px 14px' }}>
               <div className="row wrap" style={{ marginBottom: 10 }}>
-                {files.slice(0, 6).map((f) => (
-                  <span key={f.name} className="badge">
+                {/* Keyed and removed by index: a folder pick routinely contains
+                    several files with the same name in different directories. */}
+                {files.slice(0, 6).map((f, i) => (
+                  <span key={`${f.name}-${f.size}-${i}`} className="badge">
                     {f.name}
                     <button
                       onClick={() =>
-                        setFiles((list) => list.filter((x) => x.name !== f.name))
+                        setFiles((list) => list.filter((_, j) => j !== i))
                       }
                       title="Remove"
                       style={{ marginLeft: 6, opacity: 0.55, verticalAlign: -1 }}

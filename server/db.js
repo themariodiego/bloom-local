@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS courses (
                  CHECK (status IN ('learning','completed')),
   depth          TEXT    NOT NULL DEFAULT 'standard'
                  CHECK (depth IN ('simple','standard','deep')),
-  model          TEXT    NOT NULL DEFAULT 'claude-sonnet-5',
+  model          TEXT    NOT NULL DEFAULT 'claude-opus-5-5',
   reference      TEXT    DEFAULT '',
   source_name    TEXT,
   source_content TEXT,
@@ -87,6 +87,14 @@ CREATE INDEX IF NOT EXISTS idx_lessons_course     ON lessons(course_id);
 CREATE INDEX IF NOT EXISTS idx_annotations_lesson ON annotations(lesson_id);
 CREATE INDEX IF NOT EXISTS idx_events_course      ON events(course_id);
 CREATE INDEX IF NOT EXISTS idx_events_created     ON events(created_at);
+`);
+
+// Move courses pinned to retired models onto the current generation.
+db.exec(`
+UPDATE courses SET model = 'claude-opus-5-5'
+  WHERE model IN ('claude-opus-5', 'claude-opus-4-8');
+UPDATE courses SET model = 'claude-sonnet-5-5' WHERE model = 'claude-sonnet-5';
+UPDATE courses SET model = 'claude-haiku-5-5'  WHERE model = 'claude-haiku-4-5';
 `);
 
 export function recordEvent(courseId, kind, lessonNumber = null) {
